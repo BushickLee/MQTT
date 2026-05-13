@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from mqtt_bridge.config import BridgeSettings
 from mqtt_bridge.message import build_alert
-from mqtt_bridge.models import RawRiskEvent
+from mqtt_bridge.models import RawRiskEvent, canonical_phase
 
 LOGGER = logging.getLogger(__name__)
 SUCCESS_CODES = {0, mqtt.MQTT_ERR_SUCCESS}
@@ -21,6 +21,64 @@ class PublishedAlert:
     topic: str
     notification_target: str
     payload: dict[str, Any]
+
+
+@dataclass
+class BridgeRuntime:
+    settings: BridgeSettings
+    last_observed_phase_by_camera: dict[str, str] = field(default_factory=dict)
+    consecutive_phase_count_by_camera: dict[str, int] = field(default_factory=dict)
+    last_forwarded_phase_by_camera: dict[str, str] = field(default_factory=dict)
+
+    def _record_observation(self, camera_id: str, phase: str) -> int:
+        previous_phase = self.last_observed_phase_by_camera.get(camera_id)
+        if previous_phase == phase:
+            count = self.consecutive_phase_count_by_camera.get(camera_id, 0) + 1
+        else:
+            count = 1
+
+        self.last_observed_phase_by_camera[camera_id] = phase
+        self.consecutive_phase_count_by_camera[camera_id] = count
+        return count
+
+    def should_forward(self, raw_event: RawRiskEvent) -> bool:
+        camera_id = raw_event.camera_id or self.settings.default_camera_id
+        phase = canonical_phase(raw_event.phase)
+        consecutive_count = self._record_observation(camera_id, phase)
+
+        if phase == "normal" and not self.settings.publish_normal_events:
+            return False
+
+        if phase == "early_warning":
+            enough_confidence = (
+                raw_event.confidence >= self.settings.early_warning_confidence_threshold
+            )
+            enough_consecutive = (
+                consecutive_count >= self.settings.early_warning_consecutive_count
+            )
+            if not enough_confidence and not enough_consecutive:
+                return False
+
+        if phase in {"imminent_fall", "post_fall"}:
+            if raw_event.confidence < self.settings.danger_confidence_threshold:
+                return False
+
+        if (
+            self.settings.suppress_repeated_phase
+            and self.last_forwarded_phase_by_camera.get(camera_id) == phase
+        ):
+            return False
+
+        self.last_forwarded_phase_by_camera[camera_id] = phase
+        return True
+
+
+def _runtime_from_userdata(userdata: Any) -> BridgeRuntime:
+    if isinstance(userdata, BridgeRuntime):
+        return userdata
+    if isinstance(userdata, BridgeSettings):
+        return BridgeRuntime(userdata)
+    return BridgeRuntime(BridgeSettings.from_env())
 
 
 def publish_alerts(
@@ -70,7 +128,8 @@ def _reason_code_value(reason_code: Any) -> int:
 
 
 def _on_connect(client: mqtt.Client, userdata: Any, *args: Any) -> None:
-    settings = userdata if isinstance(userdata, BridgeSettings) else BridgeSettings.from_env()
+    runtime = _runtime_from_userdata(userdata)
+    settings = runtime.settings
     reason_code = args[1] if len(args) == 2 else args[-2]
 
     if _reason_code_value(reason_code) != 0:
@@ -82,12 +141,27 @@ def _on_connect(client: mqtt.Client, userdata: Any, *args: Any) -> None:
 
 
 def _on_message(client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
-    settings = userdata if isinstance(userdata, BridgeSettings) else BridgeSettings.from_env()
+    runtime = _runtime_from_userdata(userdata)
+    settings = runtime.settings
 
     try:
-        published = handle_raw_payload(client, message.payload, settings)
+        raw_event = RawRiskEvent.model_validate_json(message.payload)
     except (ValueError, ValidationError) as exc:
         LOGGER.warning("Ignored invalid raw risk event on %s: %s", message.topic, exc)
+        return
+
+    if not runtime.should_forward(raw_event):
+        LOGGER.info(
+            "Suppressed raw risk event %s on phase %s",
+            raw_event.event_id,
+            canonical_phase(raw_event.phase),
+        )
+        return
+
+    try:
+        published = publish_alerts(client, raw_event, settings)
+    except RuntimeError as exc:
+        LOGGER.error("Failed to forward raw risk event %s: %s", raw_event.event_id, exc)
         return
 
     LOGGER.info(
@@ -104,7 +178,7 @@ def create_client(settings: BridgeSettings) -> mqtt.Client:
         )
     else:
         client = mqtt.Client(client_id=settings.client_id)
-    client.user_data_set(settings)
+    client.user_data_set(BridgeRuntime(settings))
     client.on_connect = _on_connect
     client.on_message = _on_message
 

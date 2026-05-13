@@ -1,6 +1,6 @@
 import json
 
-from mqtt_bridge.bridge import handle_raw_payload, publish_alerts
+from mqtt_bridge.bridge import BridgeRuntime, handle_raw_payload, publish_alerts
 from mqtt_bridge.config import BridgeSettings
 from mqtt_bridge.models import RawRiskEvent
 
@@ -70,3 +70,36 @@ def test_handle_raw_payload_validates_json_and_publishes() -> None:
     assert client.calls[1]["payload"]["guardian_message"] == (
         "아이가 의자의 가장자리에서 낙상 임박이 일어났습니다."
     )
+
+
+def make_raw_event(**updates: object) -> RawRiskEvent:
+    payload = {**RAW_PAYLOAD, **updates}
+    return RawRiskEvent.model_validate(payload)
+
+
+def test_runtime_suppresses_normal_by_default_and_repeated_phase() -> None:
+    runtime = BridgeRuntime(BridgeSettings())
+
+    assert runtime.should_forward(make_raw_event(phase="normal", alert_level="none")) is False
+    assert runtime.should_forward(make_raw_event(phase="early_warning", confidence=0.70)) is True
+    assert runtime.should_forward(make_raw_event(phase="early_warning", confidence=0.72)) is False
+    assert runtime.should_forward(make_raw_event(phase="imminent_fall", confidence=0.90)) is True
+
+
+def test_runtime_waits_for_two_low_confidence_early_warnings() -> None:
+    runtime = BridgeRuntime(BridgeSettings())
+
+    first = make_raw_event(event_id="evt-low-1", phase="early_warning", confidence=0.40)
+    second = make_raw_event(event_id="evt-low-2", phase="early_warning", confidence=0.40)
+    third = make_raw_event(event_id="evt-low-3", phase="early_warning", confidence=0.40)
+
+    assert runtime.should_forward(first) is False
+    assert runtime.should_forward(second) is True
+    assert runtime.should_forward(third) is False
+
+
+def test_runtime_suppresses_low_confidence_danger_phase() -> None:
+    runtime = BridgeRuntime(BridgeSettings())
+
+    assert runtime.should_forward(make_raw_event(phase="imminent_fall", confidence=0.59)) is False
+    assert runtime.should_forward(make_raw_event(phase="imminent_fall", confidence=0.60)) is True

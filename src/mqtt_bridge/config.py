@@ -26,6 +26,14 @@ def _env_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer") from exc
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = _env(name, str(default))
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = _env(name, str(default)).strip().lower()
     if raw in {"1", "true", "yes", "on"}:
@@ -49,6 +57,11 @@ class BridgeSettings:
     qos: int = 1
     retain: bool = False
     connect_retry_seconds: int = 3
+    suppress_repeated_phase: bool = True
+    publish_normal_events: bool = False
+    early_warning_confidence_threshold: float = 0.65
+    danger_confidence_threshold: float = 0.60
+    early_warning_consecutive_count: int = 2
     default_camera_id: str = "room-01"
     default_hls_url: str = "http://localhost:8000/static/live/stream.m3u8"
     default_thumbnail_url: str | None = None
@@ -70,6 +83,26 @@ class BridgeSettings:
             connect_retry_seconds=_env_int(
                 "MQTT_CONNECT_RETRY_SECONDS",
                 cls.connect_retry_seconds,
+            ),
+            suppress_repeated_phase=_env_bool(
+                "MQTT_SUPPRESS_REPEATED_PHASE",
+                cls.suppress_repeated_phase,
+            ),
+            publish_normal_events=_env_bool(
+                "MQTT_PUBLISH_NORMAL_EVENTS",
+                cls.publish_normal_events,
+            ),
+            early_warning_confidence_threshold=_env_float(
+                "MQTT_EARLY_WARNING_CONFIDENCE_THRESHOLD",
+                cls.early_warning_confidence_threshold,
+            ),
+            danger_confidence_threshold=_env_float(
+                "MQTT_DANGER_CONFIDENCE_THRESHOLD",
+                cls.danger_confidence_threshold,
+            ),
+            early_warning_consecutive_count=_env_int(
+                "MQTT_EARLY_WARNING_CONSECUTIVE_COUNT",
+                cls.early_warning_consecutive_count,
             ),
             default_camera_id=_env("MQTT_DEFAULT_CAMERA_ID", cls.default_camera_id),
             default_hls_url=_env("MQTT_DEFAULT_HLS_URL", cls.default_hls_url),
