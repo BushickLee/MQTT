@@ -54,6 +54,39 @@ npm install
 npm start
 ```
 
+## 다른 리포와 합칠 때의 통합 기준
+
+이 저장소는 MQTT broker와 위험 알림 bridge만 책임집니다. `front`, `HLS`, `fall-guard-app`와 통합할 때는 각 리포의 역할을 아래처럼 분리합니다.
+
+| 리포 | 통합 역할 | MQTT와 맞춰야 할 계약 |
+| --- | --- | --- |
+| `fall-guard-app` | Edge/model/backend 쪽 위험 이벤트 생산자 또는 backend 소비자 | 모델 결과에 `event_id`, `camera_id`, `frame_id`, `timestamp`, `object_type`, `object_type_ko`, `hls_url`을 보강해 `risk/alerts/raw`에 publish |
+| `HLS` | 영상 스트림 제공자 | MQTT payload의 `hls_url`이 실제 HLS endpoint를 가리키도록 host/IP와 port를 맞춤 |
+| `front` | 보호자 앱 UI | MQTT를 직접 처리하지 않고 backend REST 응답, FCM/Expo push payload, HLS URL을 소비 |
+| backend / push bridge | MQTT 소비자와 앱 전달 계층 | `risk/alerts/guardian` 또는 `notifications/*` topic을 구독해 DB 저장, REST API 응답, FCM/APNs/Expo push로 전달 |
+
+권장 end-to-end 흐름:
+
+```text
+fall-guard-app Edge/Model
+  -> backend or publisher가 raw event 보강
+  -> Mosquitto risk/alerts/raw
+  -> mqtt_bridge validation/enrichment/gate
+  -> Mosquitto risk/alerts/guardian
+  -> backend / push bridge
+  -> front REST response 또는 FCM/Expo push
+  -> front가 hls_url로 HLS 영상 재생
+```
+
+통합 시 반드시 확인할 항목:
+
+- `MQTT_DEFAULT_HLS_URL` 또는 raw `hls_url`은 모바일 기기에서 접근 가능한 LAN IP를 써야 합니다. `localhost`는 같은 장비 안에서만 의미가 있습니다.
+- 현재 raw `timestamp` 계약은 ISO-8601 문자열입니다. `fall-guard-app` handoff 예시처럼 초 단위 숫자 timestamp를 쓰는 producer는 MQTT publish 전에 문자열 timestamp로 변환해야 합니다.
+- `event_id`는 중복 알림 억제, DB 저장, 알림 상세 조회의 기준이 되므로 producer가 안정적으로 생성해야 합니다.
+- debounce/rate gate는 한 계층만 책임져야 합니다. 현재 기본값은 이 bridge가 담당하지만, backend나 Edge runtime이 같은 책임을 맡으면 bridge gate 설정을 조정해야 합니다.
+- 실제 background/terminated OS push는 이 저장소가 직접 수행하지 않습니다. `notifications/os-background` payload를 받아 FCM/APNs/Expo push로 넘기는 별도 bridge가 필요합니다.
+- Mosquitto의 `allow_anonymous true` 설정은 로컬 시연용입니다. 배포 환경에서는 계정, ACL, TLS, 네트워크 제한을 별도로 적용해야 합니다.
+
 ## Bridge 단독 실행
 
 외부 broker를 이미 띄운 경우 Python bridge만 실행할 수 있습니다.
@@ -243,3 +276,11 @@ mosquitto_sub -h localhost -p 1883 -t 'notifications/in-app' -q 1
 ```bash
 python -m pytest
 ```
+
+## 문서 갱신 원칙
+
+유의미한 기능 추가 또는 계약 변경이 있으면 코드와 같은 단위로 README도 함께 갱신합니다.
+
+- topic 이름, payload 필드, validation 규칙, debounce 정책, 환경 변수 기본값이 바뀌면 관련 표와 예시 JSON을 수정합니다.
+- 다른 리포와의 연결 방식이 바뀌면 `다른 리포와 합칠 때의 통합 기준` 섹션을 먼저 갱신합니다.
+- README만 바뀌는 문서 작업도 별도 커밋으로 남겨 추적과 되돌리기가 쉽도록 합니다.
