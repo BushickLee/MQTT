@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mangsa-mqtt-bridge"
+version = "0.1.0"
+description = "MQTT bridge for Fall Guard risk alert notifications"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "paho-mqtt>=1.6,<3",
+  "pydantic>=2.7,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+mqtt-risk-alert-bridge = "mqtt_bridge.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

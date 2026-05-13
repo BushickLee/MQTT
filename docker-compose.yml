@@ -1,0 +1,33 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: fall-guard-mqtt-broker
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./broker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+
+  bridge:
+    build: .
+    container_name: fall-guard-mqtt-bridge
+    depends_on:
+      - mosquitto
+    environment:
+      MQTT_BROKER_HOST: mosquitto
+      MQTT_BROKER_PORT: "1883"
+      MQTT_RAW_TOPIC: risk/alerts/raw
+      MQTT_GUARDIAN_TOPIC: risk/alerts/guardian
+      MQTT_OS_BACKGROUND_TOPIC: notifications/os-background
+      MQTT_IN_APP_TOPIC: notifications/in-app
+      MQTT_QOS: "1"
+      MQTT_RETAIN: "false"
+      MQTT_CONNECT_RETRY_SECONDS: "3"
+      MQTT_DEFAULT_CAMERA_ID: room-01
+      MQTT_DEFAULT_HLS_URL: http://localhost:8000/static/live/stream.m3u8
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:
