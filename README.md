@@ -27,13 +27,14 @@ docker compose up --build
 - `1883`: Python/CLI/Edge publisher용 MQTT TCP
 - `9001`: WebSocket MQTT client용 listener
 
-## 기존 front/HLS와의 호환성 판정
+## 기존 front/HLS/fall-guard-app와의 호환성 판정
 
-이 MQTT repo만 실행한다고 기존 `front`와 `HLS`가 자동으로 end-to-end 연결되지는 않습니다.
+이 MQTT repo만 실행한다고 기존 `front`, `HLS`, `fall-guard-app`가 자동으로 end-to-end 연결되지는 않습니다.
 
 - 기존 `HLS`는 HLS 영상 파일을 `http://localhost:8000/static/live/stream.m3u8`로 서빙하지만, MQTT로 raw 위험 이벤트를 publish하는 코드나 endpoint는 없습니다.
 - 기존 `front`는 `mockRiskAlert`와 버튼 기반 로컬 알림 시뮬레이션만 사용하며, MQTT broker나 `notifications/in-app` topic을 subscribe하지 않습니다.
-- 따라서 MQTT repo만 수정 가능한 조건에서는 broker/bridge 동작과 HLS URL payload 계약까지 검증할 수 있지만, 기존 front 화면에 MQTT 알림을 직접 띄우는 완전한 UI 연동은 불가능합니다.
+- 기존 `fall-guard-app`는 Edge AI/backend/app 역할과 LSTM handoff 문서를 갖고 있지만, `backend/`, `edge/`, `configs/`에는 아직 MQTT 실행 코드가 없습니다.
+- 따라서 MQTT repo만 수정 가능한 조건에서는 broker/bridge 동작, 모델 handoff payload 수용, HLS URL payload 계약까지 검증할 수 있지만, 기존 앱 화면에 MQTT 알림을 직접 띄우는 완전한 UI 연동은 불가능합니다.
 
 기존 HLS와 함께 실행할 때는 HLS 서버를 별도로 띄운 뒤, raw MQTT payload의 `hls_url` 또는 `MQTT_DEFAULT_HLS_URL`을 HLS URL로 맞춥니다.
 
@@ -85,6 +86,11 @@ python -m mqtt_bridge
 | `MQTT_RETAIN` | `false` | publish retain 여부 |
 | `MQTT_CONNECT_RETRY_SECONDS` | `3` | broker 연결 재시도 간격 |
 | `MQTT_DEFAULT_CAMERA_ID` | `room-01` | raw에 `camera_id`가 없을 때 보강 |
+| `MQTT_SUPPRESS_REPEATED_PHASE` | `true` | 같은 camera에서 마지막 publish와 같은 phase면 suppress |
+| `MQTT_PUBLISH_NORMAL_EVENTS` | `false` | `normal` phase도 알림 topic으로 publish할지 여부 |
+| `MQTT_EARLY_WARNING_CONFIDENCE_THRESHOLD` | `0.65` | `early_warning`을 1회만으로 publish할 confidence |
+| `MQTT_DANGER_CONFIDENCE_THRESHOLD` | `0.60` | `imminent_fall`, `post_fall` publish 최소 confidence |
+| `MQTT_EARLY_WARNING_CONSECUTIVE_COUNT` | `2` | 낮은 confidence의 `early_warning` publish에 필요한 연속 감지 횟수 |
 | `MQTT_DEFAULT_HLS_URL` | `http://localhost:8000/static/live/stream.m3u8` | raw에 `hls_url`이 없을 때 보강 |
 | `MQTT_DEFAULT_THUMBNAIL_URL` | empty | raw에 `thumbnail_url`이 없을 때 보강 |
 
@@ -101,6 +107,8 @@ Publish:
 - `notifications/in-app`
 
 기본 QoS는 `1`입니다.
+
+과거 `mqtt-demo`의 `homcam/alerts/risk`와 일부 문서의 `home/home-001/event/danger`는 legacy/demo topic으로 보고, 현재 기준 topic은 `risk/alerts/raw`입니다. 다른 topic을 써야 하면 코드 수정 없이 `MQTT_RAW_TOPIC`으로 바꿉니다.
 
 전체 demo 흐름:
 
@@ -139,7 +147,29 @@ Edge/Model/CLI publisher
 - `hls_url`
 - `thumbnail_url`
 
-`phase`는 `normal`, `early_warning`, `imminent_fall`, `post_fall` 중 하나입니다. `alert_level`은 `normal`, `warning`, `critical`, `emergency` 중 하나입니다. 최신 front의 `RiskObjectType`에 맞춰 `object_type`은 `chair`, `sofa`, `table`, `bed` 중 하나만 허용합니다. `confidence`와 각 probability 값은 `0` 이상 `1` 이하입니다.
+기준 `phase`는 `normal`, `early_warning`, `imminent_fall`, `post_fall`입니다. `fall-guard-app` 문서와 UI draft의 라벨 drift를 흡수하기 위해 raw 입력에서는 아래 alias도 허용하고 output에서는 기준 phase로 정규화합니다.
+
+| raw phase | output phase |
+| --- | --- |
+| `normal`, `stable` | `normal` |
+| `early_warning`, `unstable`, `caution`, `high_risk` | `early_warning` |
+| `imminent_fall`, `fall_like`, `near_fall` | `imminent_fall` |
+| `post_fall`, `fallen`, `fall_detected` | `post_fall` |
+
+기준 `alert_level`은 최신 front 계약에 맞춰 `normal`, `warning`, `critical`, `emergency`입니다. raw 입력에서는 모델 handoff의 `none`과 `post_fall`도 허용하며, 각각 `normal`, `emergency`로 정규화합니다.
+
+최신 front의 `RiskObjectType`과 `fall-guard-app` furniture schema에 맞춰 `object_type`은 `chair`, `sofa`, `table`, `bed` 중 하나만 허용합니다. `confidence`와 각 probability 값은 `0` 이상 `1` 이하입니다. `probabilities` key도 phase alias를 허용하며 output에서는 기준 phase key만 publish합니다.
+
+## Publish 정책
+
+bridge는 raw model tick을 그대로 전부 알림 topic으로 내보내지 않습니다. 회의록과 model handoff 기준으로 debounce/rate gate는 한 곳에서만 적용해야 하므로 이 저장소에서는 bridge runtime이 기본 gate를 담당합니다.
+
+- `normal`: 기본값에서는 publish하지 않습니다.
+- `early_warning`: confidence가 `MQTT_EARLY_WARNING_CONFIDENCE_THRESHOLD` 이상이면 즉시 publish하고, 낮으면 같은 camera에서 `MQTT_EARLY_WARNING_CONSECUTIVE_COUNT`회 연속 감지된 뒤 publish합니다.
+- `imminent_fall`, `post_fall`: confidence가 `MQTT_DANGER_CONFIDENCE_THRESHOLD` 이상이면 publish합니다.
+- 같은 camera에서 마지막으로 publish한 phase와 동일한 phase는 `MQTT_SUPPRESS_REPEATED_PHASE=true`일 때 suppress합니다.
+
+이 정책은 OS push 폭주와 in-app modal 반복 표시를 막기 위한 기본값입니다. 이후 Edge runtime이나 backend가 debounce를 맡게 되면 이 bridge의 gate를 끄거나 해당 계층 하나만 책임지도록 맞춰야 합니다.
 
 ## Output Payload 계약
 
@@ -171,6 +201,8 @@ Edge/Model/CLI publisher
 ```
 
 `notifications/os-background`에는 `notification_target="os_background"`, `notifications/in-app`에는 `notification_target="in_app"`, `risk/alerts/guardian`에는 `notification_target="guardian"` payload가 publish됩니다.
+
+raw `phase` 또는 `alert_level`이 alias였으면 output에 `source_phase`, `source_alert_level`을 추가해 원본 값을 보존합니다. front `RiskAlert`가 모르는 extra field는 JSON consumer가 무시할 수 있게 root에 둡니다.
 
 OS background용 payload에는 Expo local notification에서 바로 사용할 수 있는 `guardian_message`, `phase_ko`, `event_id`, `camera_id`, `phase`가 포함됩니다.
 
