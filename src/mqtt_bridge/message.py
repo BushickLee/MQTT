@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from mqtt_bridge.config import BridgeSettings
-from mqtt_bridge.models import PHASES, RawRiskEvent, RiskAlert, RiskProbabilities
+from mqtt_bridge.models import (
+    PHASES,
+    RawRiskEvent,
+    RiskAlert,
+    RiskProbabilities,
+    canonical_alert_level,
+    canonical_phase,
+)
 
 
 def has_korean_final_consonant(text: str) -> bool:
@@ -41,12 +48,13 @@ def build_default_probabilities(phase: str, confidence: float) -> RiskProbabilit
 
 
 def normalize_probabilities(raw_event: RawRiskEvent) -> RiskProbabilities:
-    probabilities = build_default_probabilities(raw_event.phase, raw_event.confidence)
+    phase = canonical_phase(raw_event.phase)
+    probabilities = build_default_probabilities(phase, raw_event.confidence)
     if raw_event.probabilities is None:
         return probabilities
 
     for phase, value in raw_event.probabilities.items():
-        probabilities[phase] = value
+        probabilities[canonical_phase(phase)] = value
     return probabilities
 
 
@@ -56,15 +64,17 @@ def build_alert(
     notification_target: str = "guardian",
 ) -> RiskAlert:
     settings = settings or BridgeSettings()
+    phase = canonical_phase(raw_event.phase)
+    alert_level = canonical_alert_level(raw_event.alert_level)
 
     return RiskAlert(
         event_id=raw_event.event_id,
         camera_id=raw_event.camera_id or settings.default_camera_id,
         frame_id=raw_event.frame_id,
         timestamp=raw_event.timestamp,
-        phase=raw_event.phase,
+        phase=phase,
         phase_ko=raw_event.phase_ko,
-        alert_level=raw_event.alert_level,
+        alert_level=alert_level,
         confidence=raw_event.confidence,
         probabilities=normalize_probabilities(raw_event),
         guardian_message=build_guardian_message(raw_event),
@@ -74,4 +84,6 @@ def build_alert(
         object_type_ko=raw_event.object_type_ko,
         notification_targets=["os_background", "in_app"],
         notification_target=notification_target,
+        source_phase=raw_event.phase if raw_event.phase != phase else None,
+        source_alert_level=raw_event.alert_level if raw_event.alert_level != alert_level else None,
     )

@@ -72,6 +72,44 @@ def test_default_fields_are_enriched_for_frontend_contract() -> None:
     assert alert.object_type_ko == "의자"
 
 
+def test_alias_phase_is_normalized_for_frontend_contract() -> None:
+    settings = BridgeSettings()
+    raw_event = make_raw_event(
+        phase="near_fall",
+        probabilities={
+            "stable": 0.01,
+            "caution": 0.03,
+            "near_fall": 0.92,
+            "fall_detected": 0.04,
+        },
+    )
+
+    alert = build_alert(raw_event, settings)
+
+    assert alert.phase == "imminent_fall"
+    assert alert.source_phase == "near_fall"
+    assert alert.probabilities["normal"] == 0.01
+    assert alert.probabilities["early_warning"] == 0.03
+    assert alert.probabilities["imminent_fall"] == 0.92
+    assert alert.probabilities["post_fall"] == 0.04
+
+
+def test_post_fall_alert_level_alias_maps_to_emergency() -> None:
+    settings = BridgeSettings()
+    raw_event = make_raw_event(
+        phase="fall_detected",
+        phase_ko="낙상 감지",
+        alert_level="post_fall",
+    )
+
+    alert = build_alert(raw_event, settings)
+
+    assert alert.phase == "post_fall"
+    assert alert.alert_level == "emergency"
+    assert alert.source_phase == "fall_detected"
+    assert alert.source_alert_level == "post_fall"
+
+
 def test_notification_targets_are_set_per_payload() -> None:
     settings = BridgeSettings()
     raw_event = make_raw_event()
