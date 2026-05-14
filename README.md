@@ -85,7 +85,7 @@ fall-guard-app Edge/Model
 - `MQTT_DEFAULT_HLS_URL` 또는 raw `hls_url`은 모바일 기기에서 접근 가능한 LAN IP를 써야 합니다. `localhost`는 같은 장비 안에서만 의미가 있습니다.
 - 현재 raw `timestamp` 계약은 ISO-8601 문자열입니다. `fall-guard-app` handoff 예시처럼 초 단위 숫자 timestamp를 쓰는 producer는 MQTT publish 전에 문자열 timestamp로 변환해야 합니다.
 - `event_id`는 중복 알림 억제, DB 저장, 알림 상세 조회의 기준이 되므로 producer가 안정적으로 생성해야 합니다.
-- 표시용 카메라 이름과 위치는 MQTT alert가 아니라 backend `/stream` API에서 제공합니다. 예: `camera_name`, `camera_location`, `hls_url`.
+- 표시용 카메라 이름과 위치는 MQTT alert가 아니라 backend `/stream` API에서 제공합니다. 예: `camera_name`, `camera_location`, `hls_url`, `is_active`, `last_seen_at`.
 - debounce/rate gate는 한 계층만 책임져야 합니다. 현재 기본값은 이 bridge가 담당하지만, backend나 Edge runtime이 같은 책임을 맡으면 bridge gate 설정을 조정해야 합니다.
 - 실제 background/terminated OS push는 이 저장소가 직접 수행하지 않습니다. `notifications/os-background` payload를 받아 FCM/APNs/Expo push로 넘기는 별도 bridge가 필요합니다.
 - Mosquitto의 `allow_anonymous true` 설정은 로컬 시연용입니다. 배포 환경에서는 계정, ACL, TLS, 네트워크 제한을 별도로 적용해야 합니다.
@@ -228,9 +228,21 @@ bridge는 raw model tick을 그대로 전부 알림 topic으로 내보내지 않
 
 `notifications/os-background`에는 `notification_target="os_background"`, `notifications/in-app`에는 `notification_target="in_app"`, `risk/alerts/guardian`에는 `notification_target="guardian"` payload가 publish됩니다.
 
-raw `phase` 또는 `alert_level`이 alias였으면 output에 `source_phase`, `source_alert_level`을 추가해 원본 값을 보존합니다. front `RiskAlert`가 모르는 extra field는 JSON consumer가 무시할 수 있게 root에 둡니다.
+raw `phase` 또는 `alert_level`이 alias였으면 output에 `source_phase`, `source_alert_level`을 추가해 원본 값을 보존합니다. `notification_target`, `notification_targets`, `source_phase`, `source_alert_level`은 MQTT/backend 소비용 내부 필드이며, backend가 front REST API로 내려줄 때는 최신 `RiskAlert` 계약에 맞춰 제거해도 됩니다.
 
-OS background용 payload에는 Expo local notification에서 바로 사용할 수 있는 `guardian_message`, `phase_ko`, `event_id`, `phase`, `object_type`이 포함됩니다.
+OS background용 payload에는 Expo local notification에서 바로 사용할 수 있는 `guardian_message`, `phase_ko`, `event_id`, `phase`, `object_type`이 포함됩니다. Expo push bridge는 이 값을 `title`, `body`, `data.event_id`, `data.phase`, `data.object_type`으로 매핑합니다.
+
+front가 별도로 조회하는 stream 정보는 alert payload가 아니라 backend `/stream` 응답으로 제공합니다.
+
+```json
+{
+  "camera_name": "아이방 카메라",
+  "camera_location": "아이방",
+  "hls_url": "http://jetson-ip:8000/static/live/stream.m3u8",
+  "is_active": true,
+  "last_seen_at": "2026-05-12T14:32:15+09:00"
+}
+```
 
 ## 보호자 메시지 규칙
 

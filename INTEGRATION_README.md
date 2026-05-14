@@ -95,7 +95,7 @@ mosquitto_sub -h localhost -p 1883 -t notifications/in-app -q 1
 - `object_type`은 `chair`, `sofa`, `table`, `bed` 중 하나여야 합니다.
 - `confidence` 값은 `0.0` 이상 `1.0` 이하입니다.
 - `phase` alias는 입력에서 허용되지만, output은 `normal`, `early_warning`, `imminent_fall`, `post_fall`로 정규화됩니다.
-- 표시용 카메라 이름과 위치가 필요하면 MQTT alert가 아니라 backend `/stream` API에서 `camera_name`, `camera_location`, `hls_url` 형태로 제공합니다.
+- 표시용 카메라 이름과 위치가 필요하면 MQTT alert가 아니라 backend `/stream` API에서 `camera_name`, `camera_location`, `hls_url`, `is_active`, `last_seen_at` 형태로 제공합니다.
 
 ## Output 계약
 
@@ -124,6 +124,55 @@ output payload는 `front`의 `RiskAlert`와 호환되도록 주요 필드를 roo
   "hls_url": "http://192.168.0.12:8000/static/live/stream.m3u8",
   "notification_targets": ["os_background", "in_app"],
   "notification_target": "guardian"
+}
+```
+
+`notification_target`, `notification_targets`, `source_phase`, `source_alert_level`은 MQTT/backend 소비용 내부 필드입니다. backend가 `GET /alerts`, `GET /alerts/{event_id}`로 front에 내려줄 때는 아래 `RiskAlert` 필드만 유지하면 됩니다.
+
+```json
+{
+  "event_id": "evt-001",
+  "frame_id": 1234,
+  "timestamp": "2026-05-14T12:00:00+09:00",
+  "phase": "imminent_fall",
+  "phase_ko": "낙상 임박",
+  "alert_level": "critical",
+  "confidence": 0.91,
+  "object_type": "chair",
+  "object_type_ko": "의자",
+  "guardian_message": "아이가 의자의 가장자리에서 낙상 임박이 일어났습니다.",
+  "hls_url": "http://192.168.0.12:8000/static/live/stream.m3u8",
+  "thumbnail_url": "http://backend-ip/thumbnails/evt-001.jpg"
+}
+```
+
+## Stream API 계약
+
+front는 카메라 정보를 MQTT alert에서 읽지 않고 backend `/stream` 응답에서 읽습니다.
+
+```json
+{
+  "camera_name": "아이방 카메라",
+  "camera_location": "아이방",
+  "hls_url": "http://jetson-ip:8000/static/live/stream.m3u8",
+  "is_active": true,
+  "last_seen_at": "2026-05-12T14:32:15+09:00"
+}
+```
+
+## Push payload 매핑
+
+`notifications/os-background` payload를 Expo push로 넘길 때는 front의 notification listener가 상세 화면으로 이동할 수 있도록 `data.event_id`를 반드시 포함합니다.
+
+```json
+{
+  "title": "낙상 임박 위험 알림",
+  "body": "아이가 의자의 가장자리에서 낙상 임박이 일어났습니다.",
+  "data": {
+    "event_id": "evt-001",
+    "phase": "imminent_fall",
+    "object_type": "chair"
+  }
 }
 ```
 
