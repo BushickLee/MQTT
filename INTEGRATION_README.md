@@ -92,6 +92,7 @@ mosquitto_sub -h localhost -p 1883 -t notifications/in-app -q 1
 주의:
 
 - 현재 `timestamp`는 ISO-8601 문자열을 기준으로 합니다. `fall-guard-app` handoff 예시의 초 단위 숫자 timestamp는 publish 전에 문자열 timestamp로 변환해야 합니다.
+- 같은 위험 episode는 같은 `event_id`를 유지하고, 새 위험 episode는 새 `event_id`를 사용합니다. MQTT bridge는 같은 `event_id`와 `phase`의 반복 publish만 suppress합니다.
 - `object_type`은 `chair`, `sofa`, `table`, `bed` 중 하나여야 합니다.
 - `confidence` 값은 `0.0` 이상 `1.0` 이하입니다.
 - `phase` alias는 입력에서 허용되지만, output은 `normal`, `early_warning`, `imminent_fall`, `post_fall`로 정규화됩니다.
@@ -193,9 +194,9 @@ Docker Compose 내부에서 bridge가 broker에 붙을 때만 `MQTT_BROKER_HOST=
 현재 bridge는 기본적으로 다음 gate를 적용합니다.
 
 - `normal`: publish하지 않음
-- `early_warning`: confidence `0.65` 이상이면 즉시 publish, 낮으면 단일 stream에서 2회 연속 감지 후 publish
+- `early_warning`: confidence `0.65` 이상이면 즉시 publish, 낮으면 단일 stream에서 정확히 2회 연속 감지된 시점에 한 번 publish
 - `imminent_fall`, `post_fall`: confidence `0.60` 이상이면 publish
-- 단일 stream에서 마지막 publish phase와 동일하면 기본적으로 suppress
+- 단일 stream에서 마지막 publish와 같은 `event_id`와 `phase`가 반복되면 기본적으로 suppress
 
 통합 시 debounce는 한 계층만 책임져야 합니다. Edge runtime이나 backend가 이미 debounce를 담당한다면 MQTT bridge의 관련 환경 변수를 조정합니다.
 
@@ -204,13 +205,14 @@ Docker Compose 내부에서 bridge가 broker에 붙을 때만 `MQTT_BROKER_HOST=
 - `front`는 현재 MQTT를 직접 구독하지 않습니다. backend REST 또는 push bridge가 필요합니다.
 - 실제 background/terminated OS push는 이 리포가 직접 호출하지 않습니다. `notifications/os-background`를 FCM/APNs/Expo push로 전달하는 계층이 필요합니다.
 - Mosquitto 설정은 로컬 시연용입니다. 운영 배포에는 인증, ACL, TLS, 네트워크 제한이 필요합니다.
-- 같은 phase 반복 suppress는 단순 phase 기준입니다. 실제 서비스에서는 event/session 또는 cooldown 기반으로 개선하는 것이 안전합니다.
+- 같은 `event_id`와 `phase` 반복 suppress는 기본 스팸 방지용입니다. 실제 서비스에서 더 정교한 제어가 필요하면 episode timeout 또는 cooldown 기반 정책을 backend와 합의합니다.
 - 숫자 timestamp를 그대로 받을 필요가 있으면 MQTT input model을 확장해야 합니다.
 
 ## 통합 체크리스트
 
 - [ ] HLS URL이 모바일 기기에서 직접 열리는지 확인
-- [ ] raw publisher가 `event_id`, `frame_id`, `timestamp`를 안정적으로 생성하는지 확인
+- [ ] raw publisher가 같은 위험 episode에서는 같은 `event_id`, 새 위험 episode에서는 새 `event_id`를 쓰는지 확인
+- [ ] raw publisher가 `frame_id`, `timestamp`를 안정적으로 생성하는지 확인
 - [ ] raw `timestamp` 형식이 MQTT 계약과 맞는지 확인
 - [ ] `risk/alerts/raw` publish 후 `risk/alerts/guardian` 수신 확인
 - [ ] backend 또는 push bridge가 canonical alert를 저장하거나 앱으로 전달하는지 확인

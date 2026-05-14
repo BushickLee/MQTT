@@ -84,7 +84,7 @@ fall-guard-app Edge/Model
 
 - `MQTT_DEFAULT_HLS_URL` 또는 raw `hls_url`은 모바일 기기에서 접근 가능한 LAN IP를 써야 합니다. `localhost`는 같은 장비 안에서만 의미가 있습니다.
 - 현재 raw `timestamp` 계약은 ISO-8601 문자열입니다. `fall-guard-app` handoff 예시처럼 초 단위 숫자 timestamp를 쓰는 producer는 MQTT publish 전에 문자열 timestamp로 변환해야 합니다.
-- `event_id`는 중복 알림 억제, DB 저장, 알림 상세 조회의 기준이 되므로 producer가 안정적으로 생성해야 합니다.
+- `event_id`는 중복 알림 억제, DB 저장, 알림 상세 조회의 기준이 되므로 producer가 안정적으로 생성해야 합니다. 같은 위험 episode는 같은 `event_id`를 유지하고, 새 위험 episode는 새 `event_id`를 사용합니다.
 - 표시용 카메라 이름과 위치는 MQTT alert가 아니라 backend `/stream` API에서 제공합니다. 예: `camera_name`, `camera_location`, `hls_url`, `is_active`, `last_seen_at`.
 - debounce/rate gate는 한 계층만 책임져야 합니다. 현재 기본값은 이 bridge가 담당하지만, backend나 Edge runtime이 같은 책임을 맡으면 bridge gate 설정을 조정해야 합니다.
 - 실제 background/terminated OS push는 이 저장소가 직접 수행하지 않습니다. `notifications/os-background` payload를 받아 FCM/APNs/Expo push로 넘기는 별도 bridge가 필요합니다.
@@ -121,7 +121,7 @@ python -m mqtt_bridge
 | `MQTT_QOS` | `1` | subscribe/publish QoS |
 | `MQTT_RETAIN` | `false` | publish retain 여부 |
 | `MQTT_CONNECT_RETRY_SECONDS` | `3` | broker 연결 재시도 간격 |
-| `MQTT_SUPPRESS_REPEATED_PHASE` | `true` | 단일 stream에서 마지막 publish와 같은 phase면 suppress |
+| `MQTT_SUPPRESS_REPEATED_PHASE` | `true` | 단일 stream에서 마지막 publish와 같은 `event_id`와 `phase`면 suppress |
 | `MQTT_PUBLISH_NORMAL_EVENTS` | `false` | `normal` phase도 알림 topic으로 publish할지 여부 |
 | `MQTT_EARLY_WARNING_CONFIDENCE_THRESHOLD` | `0.65` | `early_warning`을 1회만으로 publish할 confidence |
 | `MQTT_DANGER_CONFIDENCE_THRESHOLD` | `0.60` | `imminent_fall`, `post_fall` publish 최소 confidence |
@@ -198,9 +198,9 @@ Edge/Model/CLI publisher
 bridge는 raw model tick을 그대로 전부 알림 topic으로 내보내지 않습니다. 회의록과 model handoff 기준으로 debounce/rate gate는 한 곳에서만 적용해야 하므로 이 저장소에서는 bridge runtime이 기본 gate를 담당합니다.
 
 - `normal`: 기본값에서는 publish하지 않습니다.
-- `early_warning`: confidence가 `MQTT_EARLY_WARNING_CONFIDENCE_THRESHOLD` 이상이면 즉시 publish하고, 낮으면 단일 stream에서 `MQTT_EARLY_WARNING_CONSECUTIVE_COUNT`회 연속 감지된 뒤 publish합니다.
+- `early_warning`: confidence가 `MQTT_EARLY_WARNING_CONFIDENCE_THRESHOLD` 이상이면 즉시 publish하고, 낮으면 단일 stream에서 정확히 `MQTT_EARLY_WARNING_CONSECUTIVE_COUNT`회 연속 감지된 시점에 한 번 publish합니다.
 - `imminent_fall`, `post_fall`: confidence가 `MQTT_DANGER_CONFIDENCE_THRESHOLD` 이상이면 publish합니다.
-- 단일 stream에서 마지막으로 publish한 phase와 동일한 phase는 `MQTT_SUPPRESS_REPEATED_PHASE=true`일 때 suppress합니다.
+- 단일 stream에서 마지막으로 publish한 `event_id`와 `phase`가 모두 같으면 `MQTT_SUPPRESS_REPEATED_PHASE=true`일 때 suppress합니다. 같은 phase라도 `event_id`가 다르면 새 위험 episode로 보고 publish 후보가 됩니다.
 
 이 정책은 OS push 폭주와 in-app modal 반복 표시를 막기 위한 기본값입니다. 이후 Edge runtime이나 backend가 debounce를 맡게 되면 이 bridge의 gate를 끄거나 해당 계층 하나만 책임지도록 맞춰야 합니다.
 
