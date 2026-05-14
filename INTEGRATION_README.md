@@ -49,7 +49,7 @@ docker compose up --build
 3. 모델 또는 테스트 publisher가 raw topic에 이벤트를 publish합니다.
 
 ```bash
-mosquitto_pub -h localhost -p 1883 -t risk/alerts/raw -q 1 -m '{"event_id":"evt-001","frame_id":1234,"timestamp":"2026-05-14T12:00:00+09:00","phase":"imminent_fall","phase_ko":"낙상 임박","alert_level":"critical","confidence":0.91,"object_type":"chair","object_type_ko":"의자","camera_id":"room-01","hls_url":"http://192.168.0.12:8000/static/live/stream.m3u8"}'
+mosquitto_pub -h localhost -p 1883 -t risk/alerts/raw -q 1 -m '{"event_id":"evt-001","frame_id":1234,"timestamp":"2026-05-14T12:00:00+09:00","phase":"imminent_fall","phase_ko":"낙상 임박","alert_level":"critical","confidence":0.91,"object_type":"chair","object_type_ko":"의자","hls_url":"http://192.168.0.12:8000/static/live/stream.m3u8"}'
 ```
 
 4. backend 또는 push bridge가 output topic을 구독합니다.
@@ -84,13 +84,6 @@ mosquitto_sub -h localhost -p 1883 -t notifications/in-app -q 1
 
 ```json
 {
-  "camera_id": "room-01",
-  "probabilities": {
-    "normal": 0.03,
-    "early_warning": 0.03,
-    "imminent_fall": 0.91,
-    "post_fall": 0.03
-  },
   "hls_url": "http://192.168.0.12:8000/static/live/stream.m3u8",
   "thumbnail_url": "http://192.168.0.12:8000/static/clips/thumb.jpg"
 }
@@ -100,8 +93,9 @@ mosquitto_sub -h localhost -p 1883 -t notifications/in-app -q 1
 
 - 현재 `timestamp`는 ISO-8601 문자열을 기준으로 합니다. `fall-guard-app` handoff 예시의 초 단위 숫자 timestamp는 publish 전에 문자열 timestamp로 변환해야 합니다.
 - `object_type`은 `chair`, `sofa`, `table`, `bed` 중 하나여야 합니다.
-- `confidence`와 `probabilities` 값은 `0.0` 이상 `1.0` 이하입니다.
+- `confidence` 값은 `0.0` 이상 `1.0` 이하입니다.
 - `phase` alias는 입력에서 허용되지만, output은 `normal`, `early_warning`, `imminent_fall`, `post_fall`로 정규화됩니다.
+- 표시용 카메라 이름과 위치가 필요하면 MQTT alert가 아니라 backend `/stream` API에서 `camera_name`, `camera_location`, `hls_url` 형태로 제공합니다.
 
 ## Output 계약
 
@@ -118,23 +112,16 @@ output payload는 `front`의 `RiskAlert`와 호환되도록 주요 필드를 roo
 ```json
 {
   "event_id": "evt-001",
-  "camera_id": "room-01",
   "frame_id": 1234,
   "timestamp": "2026-05-14T12:00:00+09:00",
   "phase": "imminent_fall",
   "phase_ko": "낙상 임박",
   "alert_level": "critical",
   "confidence": 0.91,
-  "probabilities": {
-    "normal": 0.03,
-    "early_warning": 0.03,
-    "imminent_fall": 0.91,
-    "post_fall": 0.03
-  },
-  "guardian_message": "아이가 의자의 가장자리에서 낙상 임박이 일어났습니다.",
-  "hls_url": "http://192.168.0.12:8000/static/live/stream.m3u8",
   "object_type": "chair",
   "object_type_ko": "의자",
+  "guardian_message": "아이가 의자의 가장자리에서 낙상 임박이 일어났습니다.",
+  "hls_url": "http://192.168.0.12:8000/static/live/stream.m3u8",
   "notification_targets": ["os_background", "in_app"],
   "notification_target": "guardian"
 }
@@ -157,9 +144,9 @@ Docker Compose 내부에서 bridge가 broker에 붙을 때만 `MQTT_BROKER_HOST=
 현재 bridge는 기본적으로 다음 gate를 적용합니다.
 
 - `normal`: publish하지 않음
-- `early_warning`: confidence `0.65` 이상이면 즉시 publish, 낮으면 같은 camera에서 2회 연속 감지 후 publish
+- `early_warning`: confidence `0.65` 이상이면 즉시 publish, 낮으면 단일 stream에서 2회 연속 감지 후 publish
 - `imminent_fall`, `post_fall`: confidence `0.60` 이상이면 publish
-- 같은 camera에서 마지막 publish phase와 동일하면 기본적으로 suppress
+- 단일 stream에서 마지막 publish phase와 동일하면 기본적으로 suppress
 
 통합 시 debounce는 한 계층만 책임져야 합니다. Edge runtime이나 backend가 이미 debounce를 담당한다면 MQTT bridge의 관련 환경 변수를 조정합니다.
 
@@ -174,7 +161,7 @@ Docker Compose 내부에서 bridge가 broker에 붙을 때만 `MQTT_BROKER_HOST=
 ## 통합 체크리스트
 
 - [ ] HLS URL이 모바일 기기에서 직접 열리는지 확인
-- [ ] raw publisher가 `event_id`, `camera_id`, `frame_id`, `timestamp`를 안정적으로 생성하는지 확인
+- [ ] raw publisher가 `event_id`, `frame_id`, `timestamp`를 안정적으로 생성하는지 확인
 - [ ] raw `timestamp` 형식이 MQTT 계약과 맞는지 확인
 - [ ] `risk/alerts/raw` publish 후 `risk/alerts/guardian` 수신 확인
 - [ ] backend 또는 push bridge가 canonical alert를 저장하거나 앱으로 전달하는지 확인
