@@ -29,6 +29,7 @@ class BridgeRuntime:
     last_observed_phase: str | None = None
     consecutive_phase_count: int = 0
     last_forwarded_phase: str | None = None
+    last_forwarded_event_id: str | None = None
 
     def _record_observation(self, phase: str) -> int:
         if self.last_observed_phase == phase:
@@ -52,7 +53,7 @@ class BridgeRuntime:
                 raw_event.confidence >= self.settings.early_warning_confidence_threshold
             )
             enough_consecutive = (
-                consecutive_count >= self.settings.early_warning_consecutive_count
+                consecutive_count == self.settings.early_warning_consecutive_count
             )
             if not enough_confidence and not enough_consecutive:
                 return False
@@ -64,10 +65,12 @@ class BridgeRuntime:
         if (
             self.settings.suppress_repeated_phase
             and self.last_forwarded_phase == phase
+            and self.last_forwarded_event_id == raw_event.event_id
         ):
             return False
 
         self.last_forwarded_phase = phase
+        self.last_forwarded_event_id = raw_event.event_id
         return True
 
 
@@ -110,13 +113,25 @@ def publish_alerts(
     return published
 
 
+def forward_raw_event(
+    client: Any,
+    raw_event: RawRiskEvent,
+    runtime: BridgeRuntime,
+) -> list[PublishedAlert]:
+    if not runtime.should_forward(raw_event):
+        return []
+    return publish_alerts(client, raw_event, runtime.settings)
+
+
 def handle_raw_payload(
     client: Any,
     payload: bytes | str,
     settings: BridgeSettings,
+    runtime: BridgeRuntime | None = None,
 ) -> list[PublishedAlert]:
+    runtime = runtime or BridgeRuntime(settings)
     raw_event = RawRiskEvent.model_validate_json(payload)
-    return publish_alerts(client, raw_event, settings)
+    return forward_raw_event(client, raw_event, runtime)
 
 
 def _reason_code_value(reason_code: Any) -> int:
@@ -140,7 +155,6 @@ def _on_connect(client: mqtt.Client, userdata: Any, *args: Any) -> None:
 
 def _on_message(client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
     runtime = _runtime_from_userdata(userdata)
-    settings = runtime.settings
 
     try:
         raw_event = RawRiskEvent.model_validate_json(message.payload)
@@ -148,18 +162,18 @@ def _on_message(client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -
         LOGGER.warning("Ignored invalid raw risk event on %s: %s", message.topic, exc)
         return
 
-    if not runtime.should_forward(raw_event):
+    try:
+        published = forward_raw_event(client, raw_event, runtime)
+    except RuntimeError as exc:
+        LOGGER.error("Failed to forward raw risk event %s: %s", raw_event.event_id, exc)
+        return
+
+    if not published:
         LOGGER.info(
             "Suppressed raw risk event %s on phase %s",
             raw_event.event_id,
             canonical_phase(raw_event.phase),
         )
-        return
-
-    try:
-        published = publish_alerts(client, raw_event, settings)
-    except RuntimeError as exc:
-        LOGGER.error("Failed to forward raw risk event %s: %s", raw_event.event_id, exc)
         return
 
     LOGGER.info(

@@ -74,6 +74,53 @@ def test_handle_raw_payload_validates_json_and_publishes() -> None:
     )
 
 
+def test_handle_raw_payload_applies_runtime_gate() -> None:
+    settings = BridgeSettings()
+    runtime = BridgeRuntime(settings)
+    client = FakeMqttClient()
+    normal_payload = {
+        **RAW_PAYLOAD,
+        "event_id": "evt-normal-001",
+        "phase": "normal",
+        "phase_ko": "정상",
+        "alert_level": "none",
+        "confidence": 0.98,
+    }
+
+    published = handle_raw_payload(
+        client,
+        json.dumps(normal_payload).encode("utf-8"),
+        settings,
+        runtime=runtime,
+    )
+
+    assert published == []
+    assert client.calls == []
+
+
+def test_handle_raw_payload_suppresses_repeated_same_event() -> None:
+    settings = BridgeSettings()
+    runtime = BridgeRuntime(settings)
+    client = FakeMqttClient()
+
+    first = handle_raw_payload(
+        client,
+        json.dumps(RAW_PAYLOAD).encode("utf-8"),
+        settings,
+        runtime=runtime,
+    )
+    second = handle_raw_payload(
+        client,
+        json.dumps(RAW_PAYLOAD).encode("utf-8"),
+        settings,
+        runtime=runtime,
+    )
+
+    assert len(first) == 3
+    assert second == []
+    assert len(client.calls) == 3
+
+
 def make_raw_event(**updates: object) -> RawRiskEvent:
     payload = {**RAW_PAYLOAD, **updates}
     return RawRiskEvent.model_validate(payload)
@@ -85,6 +132,9 @@ def test_runtime_suppresses_normal_by_default_and_repeated_phase_globally() -> N
     assert runtime.should_forward(make_raw_event(phase="normal", alert_level="none")) is False
     assert runtime.should_forward(make_raw_event(phase="early_warning", confidence=0.70)) is True
     assert runtime.should_forward(make_raw_event(phase="early_warning", confidence=0.72)) is False
+    assert runtime.should_forward(
+        make_raw_event(event_id="evt-new-risk", phase="early_warning", confidence=0.72)
+    ) is True
     assert runtime.should_forward(make_raw_event(phase="imminent_fall", confidence=0.90)) is True
 
 
