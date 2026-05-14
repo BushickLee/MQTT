@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -26,25 +26,23 @@ class PublishedAlert:
 @dataclass
 class BridgeRuntime:
     settings: BridgeSettings
-    last_observed_phase_by_camera: dict[str, str] = field(default_factory=dict)
-    consecutive_phase_count_by_camera: dict[str, int] = field(default_factory=dict)
-    last_forwarded_phase_by_camera: dict[str, str] = field(default_factory=dict)
+    last_observed_phase: str | None = None
+    consecutive_phase_count: int = 0
+    last_forwarded_phase: str | None = None
 
-    def _record_observation(self, camera_id: str, phase: str) -> int:
-        previous_phase = self.last_observed_phase_by_camera.get(camera_id)
-        if previous_phase == phase:
-            count = self.consecutive_phase_count_by_camera.get(camera_id, 0) + 1
+    def _record_observation(self, phase: str) -> int:
+        if self.last_observed_phase == phase:
+            count = self.consecutive_phase_count + 1
         else:
             count = 1
 
-        self.last_observed_phase_by_camera[camera_id] = phase
-        self.consecutive_phase_count_by_camera[camera_id] = count
+        self.last_observed_phase = phase
+        self.consecutive_phase_count = count
         return count
 
     def should_forward(self, raw_event: RawRiskEvent) -> bool:
-        camera_id = raw_event.camera_id or self.settings.default_camera_id
         phase = canonical_phase(raw_event.phase)
-        consecutive_count = self._record_observation(camera_id, phase)
+        consecutive_count = self._record_observation(phase)
 
         if phase == "normal" and not self.settings.publish_normal_events:
             return False
@@ -65,11 +63,11 @@ class BridgeRuntime:
 
         if (
             self.settings.suppress_repeated_phase
-            and self.last_forwarded_phase_by_camera.get(camera_id) == phase
+            and self.last_forwarded_phase == phase
         ):
             return False
 
-        self.last_forwarded_phase_by_camera[camera_id] = phase
+        self.last_forwarded_phase = phase
         return True
 
 

@@ -24,16 +24,6 @@ RawAlertLevel = Literal["normal", "warning", "critical", "emergency", "none", "p
 NotificationTarget = Literal["guardian", "os_background", "in_app"]
 RiskObjectType = Literal["chair", "sofa", "table", "bed"]
 
-PHASES: tuple[RiskPhase, ...] = (
-    "normal",
-    "early_warning",
-    "imminent_fall",
-    "post_fall",
-)
-
-RiskProbabilities = dict[RiskPhase, float]
-RawRiskProbabilities = dict[str, float]
-
 PHASE_ALIASES: dict[str, RiskPhase] = {
     "normal": "normal",
     "stable": "normal",
@@ -68,7 +58,7 @@ def canonical_alert_level(alert_level: str) -> AlertLevel:
 
 
 class RawRiskEvent(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     event_id: str
     frame_id: int = Field(ge=0)
@@ -79,8 +69,6 @@ class RawRiskEvent(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     object_type: RiskObjectType
     object_type_ko: str
-    camera_id: str | None = None
-    probabilities: RawRiskProbabilities | None = None
     hls_url: str | None = None
     thumbnail_url: str | None = None
 
@@ -98,37 +86,20 @@ class RawRiskEvent(BaseModel):
             raise ValueError("field must not be empty")
         return value
 
-    @field_validator("probabilities", mode="after")
-    @classmethod
-    def validate_probabilities(
-        cls,
-        value: RawRiskProbabilities | None,
-    ) -> RawRiskProbabilities | None:
-        if value is None:
-            return value
-        for phase, probability in value.items():
-            if phase not in PHASE_ALIASES:
-                raise ValueError(f"unsupported probability phase: {phase}")
-            if probability < 0.0 or probability > 1.0:
-                raise ValueError(f"probability for {phase} must be between 0 and 1")
-        return value
-
 
 class RiskAlert(BaseModel):
     event_id: str
-    camera_id: str
     frame_id: int
     timestamp: str
     phase: RiskPhase
     phase_ko: str
     alert_level: AlertLevel
     confidence: float = Field(ge=0.0, le=1.0)
-    probabilities: RiskProbabilities
+    object_type: RiskObjectType
+    object_type_ko: str
     guardian_message: str
     hls_url: str
     thumbnail_url: str | None = None
-    object_type: RiskObjectType
-    object_type_ko: str
     notification_targets: list[Literal["os_background", "in_app"]]
     notification_target: NotificationTarget
     source_phase: str | None = None

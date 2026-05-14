@@ -30,7 +30,6 @@ services:
       MQTT_EARLY_WARNING_CONFIDENCE_THRESHOLD: "0.65"
       MQTT_DANGER_CONFIDENCE_THRESHOLD: "0.60"
       MQTT_EARLY_WARNING_CONSECUTIVE_COUNT: "2"
-      MQTT_DEFAULT_CAMERA_ID: room-01
       MQTT_DEFAULT_HLS_URL: http://localhost:8000/static/live/stream.m3u8
 
 volumes:

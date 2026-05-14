@@ -62,7 +62,6 @@ class BridgeSettings:
     early_warning_confidence_threshold: float = 0.65
     danger_confidence_threshold: float = 0.60
     early_warning_consecutive_count: int = 2
-    default_camera_id: str = "room-01"
     default_hls_url: str = "http://localhost:8000/static/live/stream.m3u8"
     default_thumbnail_url: str | None = None
 
@@ -104,7 +103,6 @@ class BridgeSettings:
                 "MQTT_EARLY_WARNING_CONSECUTIVE_COUNT",
                 cls.early_warning_consecutive_count,
             ),
-            default_camera_id=_env("MQTT_DEFAULT_CAMERA_ID", cls.default_camera_id),
             default_hls_url=_env("MQTT_DEFAULT_HLS_URL", cls.default_hls_url),
             default_thumbnail_url=_env_optional("MQTT_DEFAULT_THUMBNAIL_URL"),
         )

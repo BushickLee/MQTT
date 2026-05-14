@@ -56,6 +56,8 @@ def test_publish_alerts_publishes_to_three_topics() -> None:
         "os_background",
         "in_app",
     ]
+    assert all("camera_id" not in call["payload"] for call in client.calls)
+    assert all("probabilities" not in call["payload"] for call in client.calls)
     assert all(call["qos"] == 1 for call in client.calls)
     assert all(call["retain"] is False for call in client.calls)
 
@@ -77,7 +79,7 @@ def make_raw_event(**updates: object) -> RawRiskEvent:
     return RawRiskEvent.model_validate(payload)
 
 
-def test_runtime_suppresses_normal_by_default_and_repeated_phase() -> None:
+def test_runtime_suppresses_normal_by_default_and_repeated_phase_globally() -> None:
     runtime = BridgeRuntime(BridgeSettings())
 
     assert runtime.should_forward(make_raw_event(phase="normal", alert_level="none")) is False
