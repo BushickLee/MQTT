@@ -14,6 +14,8 @@ Fall Guard 위험 이벤트를 MQTT로 받아 보호자 알림 payload로 보강
 
 실제 background/terminated 상태의 OS push는 FCM/APNs bridge 또는 Expo push token 연동이 필요합니다. 이 저장소는 외부 push API를 호출하지 않고, OS background용 payload와 mock-forward 구조까지만 제공합니다.
 
+통합 작업만 빠르게 확인하려면 [INTEGRATION_README.md](./INTEGRATION_README.md)를 먼저 봅니다.
+
 ## 전체 실행
 
 broker와 bridge를 함께 실행합니다.
