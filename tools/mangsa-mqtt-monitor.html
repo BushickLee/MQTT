@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mangsa MQTT Monitor</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, "Noto Sans KR", sans-serif;
+      background: #f5f7fa;
+      color: #17202a;
+    }
+
+    body {
+      margin: 0;
+      padding: 28px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid #cfd7e3;
+      border-radius: 8px;
+      background: #fff;
+      font-size: 14px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #8a94a6;
+    }
+
+    .connected .dot {
+      background: #16835f;
+    }
+
+    .error .dot {
+      background: #c0392b;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(280px, 420px) 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    section {
+      background: #fff;
+      border: 1px solid #d8e0ea;
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    dl {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 8px 12px;
+      margin: 0;
+      font-size: 14px;
+    }
+
+    dt {
+      color: #607086;
+    }
+
+    dd {
+      margin: 0;
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .alert {
+      border-left: 5px solid #c0392b;
+    }
+
+    .message {
+      font-size: 22px;
+      font-weight: 800;
+      line-height: 1.35;
+      margin: 4px 0 14px;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0;
+      padding: 12px;
+      background: #101820;
+      color: #d8f3dc;
+      border-radius: 8px;
+      min-height: 260px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 780px) {
+      body {
+        padding: 16px;
+      }
+
+      header,
+      main {
+        display: block;
+      }
+
+      .status {
+        margin-top: 12px;
+      }
+
+      section {
+        margin-bottom: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Mangsa MQTT Monitor</h1>
+    <div id="status" class="status">
+      <span class="dot"></span>
+      <span>connecting ws://localhost:9001</span>
+    </div>
+  </header>
+  <main>
+    <section class="alert">
+      <h2>Latest In-App Alert</h2>
+      <p id="message" class="message">이벤트 대기 중</p>
+      <dl>
+        <dt>event_id</dt><dd id="event_id">-</dd>
+        <dt>phase</dt><dd id="phase">-</dd>
+        <dt>alert_level</dt><dd id="alert_level">-</dd>
+        <dt>confidence</dt><dd id="confidence">-</dd>
+        <dt>object</dt><dd id="object_type">-</dd>
+        <dt>timestamp</dt><dd id="timestamp">-</dd>
+      </dl>
+    </section>
+    <section>
+      <h2>Raw Payload</h2>
+      <pre id="raw">notifications/in-app 구독 중...</pre>
+    </section>
+  </main>
+  <script>
+    const statusEl = document.getElementById("status");
+    const statusText = statusEl.querySelector("span:last-child");
+    const rawEl = document.getElementById("raw");
+    const client = mqtt.connect("ws://localhost:9001", {
+      protocolVersion: 4,
+      reconnectPeriod: 1000,
+      connectTimeout: 4000,
+      clientId: "mangsa-visual-monitor-" + Math.random().toString(16).slice(2),
+    });
+
+    function setStatus(className, text) {
+      statusEl.className = "status " + className;
+      statusText.textContent = text;
+    }
+
+    client.on("connect", () => {
+      setStatus("connected", "connected: notifications/in-app");
+      client.subscribe("notifications/in-app", { qos: 1 });
+    });
+
+    client.on("reconnect", () => setStatus("", "reconnecting ws://localhost:9001"));
+    client.on("error", (err) => setStatus("error", err.message));
+    client.on("offline", () => setStatus("error", "offline"));
+
+    client.on("message", (_topic, payload) => {
+      const text = payload.toString();
+      rawEl.textContent = text;
+
+      try {
+        const data = JSON.parse(text);
+        document.getElementById("message").textContent = data.guardian_message || "메시지 없음";
+        document.getElementById("event_id").textContent = data.event_id || "-";
+        document.getElementById("phase").textContent = data.phase || "-";
+        document.getElementById("alert_level").textContent = data.alert_level || "-";
+        document.getElementById("confidence").textContent = data.confidence ?? "-";
+        document.getElementById("object_type").textContent =
+          [data.object_type, data.object_type_ko].filter(Boolean).join(" / ") || "-";
+        document.getElementById("timestamp").textContent = data.timestamp || "-";
+      } catch (err) {
+        document.getElementById("message").textContent = "JSON parse error";
+      }
+    });
+  </script>
+</body>
+</html>
